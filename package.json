@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "opencode-go-usage-plugin",
+  "version": "0.1.0",
+  "description": "OpenCode Go quota (5h / weekly / monthly) shown in the opencode TUI sidebar.",
+  "keywords": [
+    "opencode",
+    "plugin",
+    "tui",
+    "usage",
+    "quota",
+    "opencode-go"
+  ],
+  "license": "MIT",
+  "author": "oasrcode",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/oasrcode/opencode-go-usage-plugin.git"
+  },
+  "homepage": "https://github.com/oasrcode/opencode-go-usage-plugin#readme",
+  "bugs": {
+    "url": "https://github.com/oasrcode/opencode-go-usage-plugin/issues"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    "./tui": "./src/tui.tsx"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "prepublishOnly": "npm run typecheck && npm test"
+  },
+  "peerDependencies": {
+    "@opentui/core": ">=0.4.5",
+    "@opentui/solid": ">=0.4.5",
+    "solid-js": ">=1.9.0"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "1.18.31",
+    "@opentui/core": "0.4.5",
+    "@opentui/keymap": "0.4.5",
+    "@opentui/solid": "0.4.5",
+    "@types/node": "^24.13.6",
+    "solid-js": "1.9.12",
+    "typescript": "5.8.2",
+    "vitest": "3.2.4"
+  }
+}
