@@ -14,7 +14,7 @@ export const USAGE_WINDOW_KEYS: readonly UsageWindowKey[] = ["rolling", "weekly"
 /** A normalized quota window ready for display. */
 export interface UsageWindow {
   key: UsageWindowKey
-  /** Human label, e.g. "5h" / "Semanal" / "Mensual". */
+  /** Human label, e.g. "5h" / "Weekly" / "Monthly". */
   label: string
   /** Percentage already used, 0-100. */
   percent: number

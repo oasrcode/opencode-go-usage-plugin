@@ -12,8 +12,8 @@ import {
 /** Display labels per window, in canonical order. */
 export const WINDOW_LABELS: Record<UsageWindowKey, string> = {
   rolling: "5h",
-  weekly: "Semanal",
-  monthly: "Mensual",
+  weekly: "Weekly",
+  monthly: "Monthly",
 }
 
 /** Severity buckets used to pick colors in the UI. */

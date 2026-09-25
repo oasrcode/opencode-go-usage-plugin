@@ -6,7 +6,7 @@ Widget para el sidebar de [opencode](https://opencode.ai) que muestra, siempre v
 
 ## Qué hace
 
-- Muestra el **porcentaje usado** de cada ventana de cuota: `5h`, `Semanal` y `Mensual`, con color según severidad (verde → ámbar → rojo).
+- Muestra el **porcentaje usado** de cada ventana de cuota: `5h`, `Weekly` y `Monthly`, con color según severidad (verde → ámbar → rojo).
 - Muestra la **cuenta atrás hasta el reset** de cada ventana (`↻ 4h 13m`).
 - Muestra la **frescura del dato** en la cabecera (`hace 1m`) y **estados de error** legibles.
 - **Cachea** el último snapshot correcto para pintar al instante al abrir opencode.
@@ -19,8 +19,8 @@ Salida real del sidebar:
 ```
 OpenCode Go · hace 1m
 5h 1% ↻ 4h 13m
-Semanal 4% ↻ 2d 5h
-Mensual 9% ↻ 19d 22h
+Weekly 4% ↻ 2d 5h
+Monthly 9% ↻ 19d 22h
 ```
 
 ## Requisitos
