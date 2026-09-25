@@ -50,8 +50,17 @@ function errorMessage(kind: UsageError["kind"]): string {
   }
 }
 
-/** Structural guard for a window loaded back from the KV cache (untrusted). */
-function isUsageWindow(value: unknown): value is UsageWindow {
+/**
+ * Wire-derived fields of a window persisted in the KV cache. `resetsInMs` is
+ * deliberately excluded: it is derived from `resetsAt`, the sidebar never reads
+ * it (`buildSidebarView` recomputes the countdown on every render) and it does
+ * not survive a JSON round-trip when `resetsAt` is unparseable (`normalizeWindows`
+ * emits `NaN`, which `JSON.stringify` turns into `null`).
+ */
+type CachedUsageWindow = Omit<UsageWindow, "resetsInMs">
+
+/** Structural guard for the wire-derived fields loaded back from the KV cache (untrusted). */
+function isUsageWindow(value: unknown): value is CachedUsageWindow {
   if (typeof value !== "object" || value === null) return false
   const w = value as Record<string, unknown>
   return (
@@ -59,8 +68,7 @@ function isUsageWindow(value: unknown): value is UsageWindow {
     typeof w.label === "string" &&
     typeof w.percent === "number" &&
     Number.isFinite(w.percent) &&
-    typeof w.resetsAt === "string" &&
-    typeof w.resetsInMs === "number"
+    typeof w.resetsAt === "string"
   )
 }
 
@@ -78,7 +86,12 @@ function readCachedSnapshot(api: TuiPluginApi): UsageSnapshot | undefined {
   if (!Array.isArray(candidate.windows)) return undefined
   if (typeof candidate.fetchedAt !== "number" || !Number.isFinite(candidate.fetchedAt)) return undefined
 
-  const windows = candidate.windows.filter(isUsageWindow)
+  // Rebuild the full `UsageWindow` by recomputing the derived `resetsInMs` from
+  // `resetsAt`, so a stale (or JSON-nulled) cached value never leaks through.
+  const now = Date.now()
+  const windows: UsageWindow[] = candidate.windows
+    .filter(isUsageWindow)
+    .map((w) => ({ ...w, resetsInMs: resetsInMs(w.resetsAt, now) }))
   if (windows.length === 0) return undefined
   return { windows, fetchedAt: candidate.fetchedAt }
 }
@@ -232,8 +245,12 @@ export function createUsageWidget(api: TuiPluginApi): UsageWidget {
   let tick: ReturnType<typeof setInterval> | undefined
   let unsubscribeIdle: (() => void) | undefined
   let unregisterKeymap: (() => void) | undefined
+  let disposed = false
 
   api.lifecycle.onDispose(() => {
+    // A host may invoke dispose more than once; run the cleanup at most once.
+    if (disposed) return
+    disposed = true
     controller?.dispose()
     if (tick !== undefined) clearInterval(tick)
     unsubscribeIdle?.()
