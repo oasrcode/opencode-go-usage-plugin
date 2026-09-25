@@ -31,12 +31,14 @@
   "files": [
     "src",
     "README.md",
+    "README.es.md",
     "LICENSE"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "prepublishOnly": "npm run typecheck && npm test"
+    "prepublishOnly": "npm run typecheck && npm test",
+    "sync:dist": "bash scripts/sync-dist.sh"
   },
   "peerDependencies": {
     "@opentui/core": ">=0.4.5",
