@@ -25,34 +25,15 @@ Monthly 9% ↻ 19d 22h
 
 ## Requirements
 
-- **opencode >= 1.18**.
+- **opencode >= 2.0** — the plugin is built on the OpenCode 2.0 plugin SDK (`@opencode/plugin`).
 - An active **OpenCode Go** plan (with its API key configured in opencode). Without a plan, the endpoint returns `403` and the widget says so.
 - **Node >= 20** — development only. The opencode runtime (Bun) compiles the `.tsx` directly, so **no bundler or build step is needed**.
 
 ## Installation
 
-### Option A — Local (verified)
+The plugin is registered in the OpenCode 2.0 **CLI** config (`cli.json`) — not in `opencode.json` — using the `plugins` array. Each entry can be a `string` or a `[spec, options]` pair.
 
-1. Install dependencies (only if you are going to edit it):
-
-   ```sh
-   npm install
-   ```
-
-2. Register the plugin in the **TUI** config (not in `opencode.json`). Create or edit `~/.config/opencode/tui.json` with an **absolute path** to the entrypoint:
-
-   ```json
-   {
-     "$schema": "https://opencode.ai/tui.json",
-     "plugin": ["/absolute/path/to/opencode-go-usage-plugin/src/tui.tsx"]
-   }
-   ```
-
-   > `plugin` is an array; each entry can be a `string` or a `[spec, options]` pair. The **absolute path** form is the one that is verified.
-
-3. **Restart opencode.** The "OpenCode Go" block should appear in the session sidebar.
-
-### Option B — npm (once the package is published)
+### Option A — npm
 
 Install it with the opencode plugin command (it updates the config for you):
 
@@ -60,18 +41,37 @@ Install it with the opencode plugin command (it updates the config for you):
 opencode plugin opencode-go-usage-plugin
 ```
 
-Or add it by hand to `~/.config/opencode/tui.json` using the package spec:
+Or add it by hand to `~/.config/opencode/cli.json` using the package spec:
 
 ```json
 {
-  "$schema": "https://opencode.ai/tui.json",
-  "plugin": ["opencode-go-usage-plugin"]
+  "plugins": ["opencode-go-usage-plugin"]
 }
 ```
 
 > The package exposes its entrypoint at the `./tui` subpath (`exports["./tui"]`). If your loader version does not resolve the default export, use the explicit subpath: `opencode-go-usage-plugin/tui`.
 
 Then **restart opencode**.
+
+### Option B — Local (dev path)
+
+1. Install dependencies (only if you are going to edit it):
+
+   ```sh
+   npm install
+   ```
+
+2. Register the plugin in `~/.config/opencode/cli.json` with an **absolute path** to the entrypoint:
+
+   ```json
+   {
+     "plugins": ["/absolute/path/to/opencode-go-usage-plugin/src/tui.tsx"]
+   }
+   ```
+
+   > The entry stays an absolute path to `src/tui.tsx`; `plugins` is an array, so each entry can be a `string` or a `[spec, options]` pair.
+
+3. **Restart opencode.** The "OpenCode Go" block should appear in the session sidebar.
 
 ## Refresh policy
 
@@ -82,7 +82,7 @@ The plugin queries the official usage endpoint with this policy:
 | **On open** (`mount`) | Paints the cache (if any) and fires a fetch in parallel. |
 | **Timer** | Every **5 min**, only if the last fetch is 5 min old or more. |
 | **Turn finished** (`session.idle`) | When a turn ends, with a **60 s** debounce to absorb bursts. |
-| **Manual** | Command **"Refresh OpenCode Go usage"**: `Ctrl+X` then `o`, or `Ctrl+P` → palette → *"Refresh OpenCode Go usage"*. Has a **30 s cooldown**. |
+| **Manual** | Command **"Refresh OpenCode Go usage"**: `Ctrl+G`, or `Ctrl+P` → palette → *"Refresh OpenCode Go usage"*. Has a **30 s cooldown**. |
 
 **Hard floor:** never more than **1 request every 60 s**, whatever the trigger. On error, retries back off `5 → 10 → 20 → 30 min` (capped) and reset on the first success.
 
@@ -90,16 +90,16 @@ The reset countdown is recomputed **locally every second**, with no network acce
 
 ## Privacy
 
-- The **API key is read at runtime** from opencode's `auth.json` (it looks for the `opencode-go` provider entry, falling back to `opencode`). The plugin **never logs or persists it**: it is not written to logs, the KV cache, or error messages.
+- The **API key is read at runtime** from opencode's `auth.json` (it looks for the `opencode-go` provider entry, falling back to `opencode`). The plugin **never logs or persists it**: it is not written to logs, the durable storage, or error messages.
 - The only network call is `GET https://opencode.ai/zen/go/v1/usage` (the official usage endpoint), with `Authorization: Bearer <key>`. The original network error is deliberately discarded so headers cannot leak.
-- The **KV cache** stores only the snapshot of percentages and dates, never the key.
+- The **durable storage** (`storage.store`) stores only the snapshot of percentages and dates, never the key.
 
 ## Troubleshooting
 
 - **The plugin does not show up**
   - Check that the plugin is registered with `/plugins` inside opencode.
-  - Start with verbose logs: `opencode --print-logs --log-level DEBUG` and look for plugin or `sidebar_content` slot errors.
-  - Verify the path in `tui.json` is **absolute** and the file exists.
+  - Start with verbose logs: `opencode --print-logs --log-level DEBUG` and look for plugin or `sidebar.content` slot errors.
+  - Verify the path in `cli.json` is **absolute** and the file exists.
 
 - **"No OpenCode Go API key"**
   - `auth.json` was not found, or it has no `opencode-go`/`opencode` entry with a `key`.
@@ -115,7 +115,7 @@ The reset countdown is recomputed **locally every second**, with no network acce
   - Network failure, timeout (10 s), or an unexpected payload. The widget keeps the last good data visible while showing the error.
 
 - **Disabling it**
-  - Set `plugin_enabled` to `false` in `tui.json`, or remove the entry from the `plugin` array, and restart opencode.
+  - Remove the entry from the `plugins` array in `cli.json` and restart opencode.
 
 ## Development
 

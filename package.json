@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
   "name": "opencode-go-usage-plugin",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "OpenCode Go quota (5h / weekly / monthly) shown in the opencode TUI sidebar.",
   "keywords": [
     "opencode",
@@ -40,16 +40,20 @@
     "prepublishOnly": "npm run typecheck && npm test",
     "sync:dist": "bash scripts/sync-dist.sh"
   },
+  "dependencies": {
+    "@opencode/plugin": "^2.0.28"
+  },
   "peerDependencies": {
-    "@opentui/core": ">=0.4.5",
-    "@opentui/solid": ">=0.4.5",
+    "@opentui/core": ">=0.5.17",
+    "@opentui/solid": ">=0.5.17",
     "solid-js": ">=1.9.0"
   },
   "devDependencies": {
-    "@opencode-ai/plugin": "1.18.31",
-    "@opentui/core": "0.4.5",
-    "@opentui/keymap": "0.4.5",
-    "@opentui/solid": "0.4.5",
+    "@opencode/client": "^2.0.28",
+    "@opencode/plugin": "^2.0.28",
+    "@opencode/theme": "^2.0.28",
+    "@opentui/core": "^0.6.4",
+    "@opentui/solid": "^0.6.4",
     "@types/node": "^24.13.6",
     "solid-js": "1.9.12",
     "typescript": "5.8.2",

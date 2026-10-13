@@ -1,7 +1,14 @@
 /** @jsxImportSource @opentui/solid */
 import { createMemo, createSignal, For, Show, type Accessor } from "solid-js"
-import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@opencode-ai/plugin/tui"
 import type { JSX } from "@opentui/solid"
+import { Plugin } from "@opencode/plugin/tui"
+
+/**
+ * The V2 plugin context. The entrypoint re-exports the module namespace as
+ * `Plugin` (there is no top-level `Context` export), so the context type is
+ * reached through `Plugin.Context`.
+ */
+type Context = Plugin.Context
 
 import { fetchUsage } from "./usage/client"
 import { createRefreshController, type RefreshController } from "./usage/refresh"
@@ -24,7 +31,7 @@ import {
 /** Stable plugin id used by opencode to address this plugin. */
 export const id = "opencode-usage-plugin"
 
-/** `api.kv` key holding the last successful snapshot so mount paints instantly. */
+/** `storage.store` key holding the last successful snapshot so mount paints instantly. */
 export const SNAPSHOT_KEY = "opencode-usage:snapshot"
 
 /** Number of milliseconds between two local countdown ticks (no network). */
@@ -51,7 +58,7 @@ function errorMessage(kind: UsageError["kind"]): string {
 }
 
 /**
- * Wire-derived fields of a window persisted in the KV cache. `resetsInMs` is
+ * Wire-derived fields of a window persisted in the durable store. `resetsInMs` is
  * deliberately excluded: it is derived from `resetsAt`, the sidebar never reads
  * it (`buildSidebarView` recomputes the countdown on every render) and it does
  * not survive a JSON round-trip when `resetsAt` is unparseable (`normalizeWindows`
@@ -59,7 +66,16 @@ function errorMessage(kind: UsageError["kind"]): string {
  */
 type CachedUsageWindow = Omit<UsageWindow, "resetsInMs">
 
-/** Structural guard for the wire-derived fields loaded back from the KV cache (untrusted). */
+/** Shape persisted through `storage.store` (durable JSON, untrusted on read). */
+interface PersistedSnapshot {
+  windows: CachedUsageWindow[]
+  fetchedAt: number
+}
+
+/** Initial durable value; `readCachedSnapshot` rejects it as an empty cache. */
+const EMPTY_SNAPSHOT: PersistedSnapshot = { windows: [], fetchedAt: 0 }
+
+/** Structural guard for the wire-derived fields loaded back from the store (untrusted). */
 function isUsageWindow(value: unknown): value is CachedUsageWindow {
   if (typeof value !== "object" || value === null) return false
   const w = value as Record<string, unknown>
@@ -72,14 +88,13 @@ function isUsageWindow(value: unknown): value is CachedUsageWindow {
   )
 }
 
-/** Read and validate the cached snapshot. Never throws; returns `undefined` on garbage. */
-function readCachedSnapshot(api: TuiPluginApi): UsageSnapshot | undefined {
-  let raw: unknown
-  try {
-    raw = api.kv.get<unknown>(SNAPSHOT_KEY, undefined)
-  } catch {
-    return undefined
-  }
+/**
+ * Read and validate the cached snapshot from the reactive store. Never throws;
+ * returns `undefined` on garbage. The store is a proxied object, so a plain
+ * synchronous property read yields the current value (instant paint).
+ */
+function readCachedSnapshot(store: PersistedSnapshot): UsageSnapshot | undefined {
+  const raw: unknown = store
   if (typeof raw !== "object" || raw === null) return undefined
 
   const candidate = raw as { windows?: unknown; fetchedAt?: unknown }
@@ -145,7 +160,7 @@ export function buildSidebarView(
 }
 
 interface UsageSidebarProps {
-  api: TuiPluginApi
+  theme: Context["theme"]
   snapshot: Accessor<UsageSnapshot | undefined>
   error: Accessor<UsageError | undefined>
   loading: Accessor<boolean>
@@ -160,8 +175,7 @@ interface UsageSidebarProps {
  * throws out of render (all formatting logic lives in `buildSidebarView`).
  */
 function UsageSidebar(props: UsageSidebarProps): JSX.Element {
-  const theme = () => props.api.theme.current
-  const muted = () => theme().textMuted
+  const muted = () => props.theme.text.muted
 
   const view = createMemo(() =>
     buildSidebarView(props.snapshot(), props.error(), props.loading(), props.now()),
@@ -170,14 +184,13 @@ function UsageSidebar(props: UsageSidebarProps): JSX.Element {
   /** Percent color by severity, using real theme tokens (normal → success). */
   const percentColor = (percent: number | undefined) => {
     if (percent === undefined) return muted()
-    const t = theme()
     switch (severity(percent)) {
       case "error":
-        return t.error
+        return props.theme.text.feedback.error.base
       case "warning":
-        return t.warning
+        return props.theme.text.feedback.warning.base
       default:
-        return t.success
+        return props.theme.text.feedback.success.base
     }
   }
 
@@ -186,7 +199,7 @@ function UsageSidebar(props: UsageSidebarProps): JSX.Element {
       <text fg={muted()}>{view().header}</text>
 
       <Show when={view().errorText}>
-        {(text) => <text fg={theme().error}>{text()}</text>}
+        {(text) => <text fg={props.theme.text.feedback.error.base}>{text()}</text>}
       </Show>
 
       <Show
@@ -222,18 +235,23 @@ export interface UsageWidget {
   error: Accessor<UsageError | undefined>
   loading: Accessor<boolean>
   now: Accessor<number>
+  /** Release every owned resource (idempotent). */
+  dispose: () => void
 }
 
 /**
  * Wire the usage widget: cache paint, refresh controller, tick interval,
- * `session.idle` subscription, keymap layer and sidebar slot.
+ * `session.idle` subscription, keymap layer and `sidebar.content` slot.
  *
- * The dispose handler is registered BEFORE any resource is allocated (N1) and
- * reads the disposers through guarded `let` bindings, so a failure halfway
- * through setup still tears down whatever was already created. `api.slots`
- * has no unregister API, so slot cleanup is left to the host.
+ * V2 cleanup is the function RETURNED from `setup`, so resource allocation is
+ * wrapped in `try/catch`: any failure halfway through tears down whatever was
+ * already created before re-throwing, keeping partial failures leak-free. Every
+ * disposer is guarded so a partially-initialized widget disposes without
+ * throwing. Unlike V1 key map layers (which had an explicit unregister handle),
+ * `context.keymap.layer` is scoped to the plugin and removed by the host on
+ * deactivate, so no disposer is needed for it.
  */
-export function createUsageWidget(api: TuiPluginApi): UsageWidget {
+export function createUsageWidget(context: Context): UsageWidget {
   const [snapshot, setSnapshot] = createSignal<UsageSnapshot | undefined>(undefined)
   const [error, setError] = createSignal<UsageError | undefined>(undefined)
   const [loading, setLoading] = createSignal(true)
@@ -244,104 +262,127 @@ export function createUsageWidget(api: TuiPluginApi): UsageWidget {
   let controller: RefreshController | undefined
   let tick: ReturnType<typeof setInterval> | undefined
   let unsubscribeIdle: (() => void) | undefined
-  let unregisterKeymap: (() => void) | undefined
+  let unregisterSlot: (() => void) | undefined
   let disposed = false
 
-  api.lifecycle.onDispose(() => {
-    // A host may invoke dispose more than once; run the cleanup at most once.
+  const dispose = () => {
+    // A host may invoke cleanup more than once; run it at most once.
     if (disposed) return
     disposed = true
     controller?.dispose()
     if (tick !== undefined) clearInterval(tick)
     unsubscribeIdle?.()
-    unregisterKeymap?.()
-  })
-
-  const cached = readCachedSnapshot(api)
-  if (cached) {
-    setSnapshot(cached)
-    setLoading(false)
+    unregisterSlot?.()
   }
 
-  controller = createRefreshController({
-    fetch: () => fetchUsage(),
-    now: () => Date.now(),
-    cache: cached,
-    onUpdate: (result) => {
-      if (result.ok) {
-        setSnapshot(result.snapshot)
-        setError(undefined)
-        try {
-          api.kv.set(SNAPSHOT_KEY, result.snapshot)
-        } catch {
-          // Cache persistence is best-effort; never break the widget over it.
-        }
-      } else {
-        // Keep the last good snapshot visible while surfacing the failure.
-        setError(result.error)
-      }
+  try {
+    // Durable, reactive store: hydrated from disk by the host before we read it.
+    const [cachedStore, persistSnapshot] = context.storage.store<PersistedSnapshot>(SNAPSHOT_KEY, {
+      initial: EMPTY_SNAPSHOT,
+    })
+    const cached = readCachedSnapshot(cachedStore)
+    if (cached) {
+      setSnapshot(cached)
       setLoading(false)
-    },
-  })
+    }
 
-  // Local-only countdown: recompute reset durations every second, no network.
-  tick = setInterval(() => setNow(Date.now()), TICK_INTERVAL_MS)
-
-  unsubscribeIdle = api.event.on("session.idle", () => {
-    void controller?.trigger("idle")
-  })
-
-  unregisterKeymap = api.keymap.registerLayer({
-    commands: [
-      {
-        namespace: "palette",
-        name: "usage.refresh",
-        title: "Refrescar uso OpenCode Go",
-        desc: "Vuelve a consultar las cuotas de OpenCode Go",
-        category: "System",
-        run: () => {
-          void controller?.trigger("manual")
-        },
+    controller = createRefreshController({
+      fetch: () => fetchUsage(),
+      now: () => Date.now(),
+      cache: cached,
+      onUpdate: (result) => {
+        if (result.ok) {
+          setSnapshot(result.snapshot)
+          setError(undefined)
+          // Cache persistence is best-effort; never break the widget over it.
+          try {
+            void persistSnapshot((draft) => {
+              draft.windows = result.snapshot.windows
+              draft.fetchedAt = result.snapshot.fetchedAt
+            }).catch(() => {})
+          } catch {
+            // Swallow synchronous updater failures too.
+          }
+        } else {
+          // Keep the last good snapshot visible while surfacing the failure.
+          setError(result.error)
+        }
+        setLoading(false)
       },
-    ],
-    // `<leader>o` is free among opencode's default keybinds (leader = ctrl+x).
-    // The command is also reachable from the command palette (ctrl+p).
-    bindings: [{ key: "<leader>o", cmd: "usage.refresh" }],
-  })
+    })
 
-  api.slots.register({
-    order: 50,
-    // SlotRenderer is invoked as (context, props); both are unused here because
-    // the widget closes over the plugin-scoped signals above.
-    slots: {
-      sidebar_content: (_ctx, _props) => (
-        <UsageSidebar api={api} snapshot={snapshot} error={error} loading={loading} now={now} />
+    // Local-only countdown: recompute reset durations every second, no network.
+    tick = setInterval(() => setNow(Date.now()), TICK_INTERVAL_MS)
+
+    unsubscribeIdle = context.data.on("session.idle", () => {
+      void controller?.trigger("idle")
+    })
+
+    context.keymap.layer(() => ({
+      mode: "global",
+      commands: [
+        {
+          id: "usage.refresh",
+          title: "Refrescar uso OpenCode Go",
+          description: "Vuelve a consultar las cuotas de OpenCode Go",
+          group: "System",
+          palette: true,
+          // A literal binding is used instead of V1's `<leader>o`: V2 leader
+          // tokens are an opt-in keymap addon (`registerLeader`) whose presence
+          // in the host is not guaranteed, whereas `ctrl+g` is parsed by the
+          // default key parser. `palette: true` keeps the command reachable
+          // from the command palette regardless.
+          bind: "ctrl+g",
+          run: () => {
+            void controller?.trigger("manual")
+          },
+        },
+      ],
+      // IDs of commands whose configured bindings should be active in this layer.
+      bindings: ["usage.refresh"],
+    }))
+
+    unregisterSlot = context.ui.slot({
+      append: "sidebar.content",
+      // The slot input carries only `sessionID`, unused here because the widget
+      // closes over the plugin-scoped signals above.
+      render: () => (
+        <UsageSidebar
+          theme={context.theme}
+          snapshot={snapshot}
+          error={error}
+          loading={loading}
+          now={now}
+        />
       ),
-    },
-  })
+    })
 
-  // Paint cache (if any) and fetch in parallel; fire-and-forget by contract.
-  void controller.trigger("mount")
+    // Paint cache (if any) and fetch in parallel; fire-and-forget by contract.
+    void controller.trigger("mount")
+  } catch (err) {
+    // A throwing setup cannot return the cleanup, so run it here and re-throw.
+    dispose()
+    throw err
+  }
 
-  return { snapshot, error, loading, now }
+  return { snapshot, error, loading, now, dispose }
 }
 
 /**
- * TUI entry point. opencode calls this once with the plugin API.
+ * TUI entry point. opencode 2.0 calls `setup` once with the plugin `Context` and
+ * keeps the returned cleanup for teardown.
  *
- * Wave 3: real sidebar widget wired to the data layer + refresh scheduler:
- *  - paints the KV-cached snapshot immediately, then refreshes on mount;
+ * Wave 3 (V2): real sidebar widget wired to the data layer + refresh scheduler:
+ *  - paints the store-cached snapshot immediately, then refreshes on mount;
  *  - refreshes on the controller's own timer and on `session.idle`;
- *  - exposes a `usage.refresh` command (command palette) for a manual refresh;
+ *  - exposes a `usage.refresh` command (command palette, `ctrl+g`) for manual refresh;
  *  - ticks a local clock every second for the reset countdown (no network);
- *  - disposes the controller, interval, listener and keymap layer on dispose.
+ *  - the returned cleanup disposes the controller, interval, listener and slot.
  */
-export const tui: TuiPlugin = async (api) => {
-  createUsageWidget(api)
-}
-
-// opencode's loader reads the module DEFAULT export (a `{ id, tui }` object);
-// named exports are ignored. We also keep the named exports above for tests/types.
-const plugin: TuiPluginModule & { id: string } = { id, tui }
-
-export default plugin
+export default Plugin.define({
+  id,
+  async setup(context: Context) {
+    const widget = createUsageWidget(context)
+    return () => widget.dispose()
+  },
+})
